@@ -7,6 +7,11 @@ import enum
 
 from .database import Base
 
+# app/models.py (добавь/обнови фрагменты)
+import sqlalchemy as sa
+from sqlalchemy.orm import relationship
+from app.database import Base
+
 class Role(str, enum.Enum):
     admin = "admin"
     masseuse = "masseuse"
@@ -25,15 +30,15 @@ class BookingStatus(str, enum.Enum):
 
 class User(Base):
     __tablename__ = "users"
-
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    telegram_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=True)
-    phone: Mapped[str] = mapped_column(String(32), unique=True, nullable=True)
-    role: Mapped[Role] = mapped_column(Enum(Role), nullable=False)
-    name_display: Mapped[str] = mapped_column(String(120), nullable=True)
-    email: Mapped[str] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    id = sa.Column(sa.Integer, primary_key=True)
+    tg_id = sa.Column(sa.BigInteger, unique=True, index=True, nullable=False)
+    role = sa.Column(sa.String(16), nullable=False, server_default="client")  # admin|provider|client
+    gender = sa.Column(sa.String(8))  # female|male|other
+    locale = sa.Column(sa.String(5), server_default="ru")
+    phone = sa.Column(sa.String(32))
+    share_phone_publicly = sa.Column(sa.Boolean, nullable=False, server_default=sa.text("false"))
+    is_active = sa.Column(sa.Boolean, nullable=False, server_default=sa.text("true"))
+    created_at = sa.Column(sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False)
 
     masseuse_profile = relationship("Masseuse", back_populates="user", uselist=False)
     client_profile = relationship("Client", back_populates="user", uselist=False)
@@ -95,3 +100,64 @@ class AdminAction(Base):
     target_id: Mapped[str] = mapped_column(String(100))
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+# Города — как раньше
+class City(Base):
+    __tablename__ = "cities"
+    id = sa.Column(sa.Integer, primary_key=True)
+    slug = sa.Column(sa.String(64), unique=True, index=True, nullable=False)
+    name_ru = sa.Column(sa.String(128), nullable=False)
+    name_lv = sa.Column(sa.String(128), nullable=False)
+    name_en = sa.Column(sa.String(128), nullable=False)
+    is_active = sa.Column(sa.Boolean, nullable=False, server_default=sa.text("true"))
+
+# Статусы профиля и подписки
+PROFILE_STATUS = sa.Enum("pending","approved","rejected","frozen", name="profile_status")
+SUB_STATUS     = sa.Enum("none","active","past_due","suspended","cancelled", name="subscription_status")
+
+class Profile(Base):
+    __tablename__ = "profiles"
+    id = sa.Column(sa.Integer, primary_key=True)
+
+    # владелец
+    user_id = sa.Column(sa.Integer, sa.ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    user = relationship("User")
+
+    # привязка к городу
+    city_id = sa.Column(sa.Integer, sa.ForeignKey("cities.id"), nullable=False, index=True)
+
+    display_name = sa.Column(sa.String(128), nullable=False)
+    about = sa.Column(sa.Text)
+    price_from = sa.Column(sa.Integer)
+    services = sa.Column(sa.JSON, nullable=False, server_default=sa.text("'[]'::jsonb"))
+    photos = sa.Column(sa.JSON, nullable=False, server_default=sa.text("'[]'::jsonb"))
+    gender = sa.Column(sa.String(8))  # для фильтрации клиентами
+
+    # модерация
+    status = sa.Column(PROFILE_STATUS, nullable=False, server_default="pending")
+    is_published = sa.Column(sa.Boolean, nullable=False, index=True, server_default=sa.text("false"))
+
+    # подписка
+    subscription_status = sa.Column(SUB_STATUS, nullable=False, server_default="none")
+    plan_id = sa.Column(sa.String(64))            # PayPal plan id
+    subscription_id = sa.Column(sa.String(64))    # PayPal subscription id
+    next_billing_at = sa.Column(sa.DateTime(timezone=True))
+    last_payment_at = sa.Column(sa.DateTime(timezone=True))
+
+    # контакт на карточке (по желанию)
+    phone_public = sa.Column(sa.String(32))
+    share_phone_publicly = sa.Column(sa.Boolean, nullable=False, server_default=sa.text("false"))
+
+    created_at = sa.Column(sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False)
+    updated_at = sa.Column(sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False)
+
+class Favorite(Base):
+    __tablename__ = "favorites"
+    id = sa.Column(sa.Integer, primary_key=True)
+    client_user_id = sa.Column(sa.Integer, sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    profile_id = sa.Column(sa.Integer, sa.ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    created_at = sa.Column(sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.UniqueConstraint("client_user_id", "profile_id", name="uq_fav_client_profile"),
+    )

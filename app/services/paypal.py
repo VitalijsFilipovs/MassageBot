@@ -65,3 +65,27 @@ class PayPalClient:
             resp = await client.post("/v1/billing/subscriptions", json=payload)
             resp.raise_for_status()
             return resp.json()
+
+def _auth_header():
+    s = get_settings()
+    creds = f"{s.paypal_client_id}:{s.paypal_client_secret}".encode()
+    return {"Authorization": "Basic " + base64.b64encode(creds).decode()}
+
+async def create_subscription(plan_id: str, subscriber_tg_id: int):
+    s = get_settings()
+    body = {
+        "plan_id": plan_id,
+        "custom_id": str(subscriber_tg_id),  # чтобы поймать в webhook
+        "application_context": {
+            "brand_name": "MassageBot",
+            "locale": "en-US",
+            "return_url": s.API_BASE_URL + "/billing/return",
+            "cancel_url": s.API_BASE_URL + "/billing/cancel"
+        }
+    }
+    async with httpx.AsyncClient(base_url=s.paypal_base_url, timeout=20) as client:
+        r = await client.post("/v1/billing/subscriptions", json=body, headers=_auth_header())
+        r.raise_for_status()
+        data = r.json()
+        approve = next((l["href"] for l in data["links"] if l["rel"]=="approve"), None)
+        return {"subscription_id": data["id"], "approve_url": approve}
