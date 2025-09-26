@@ -1,41 +1,42 @@
 # bot/main.py
-import os, asyncio
+import os, asyncio, logging, importlib
+from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher
-from aiogram.types import BotCommand
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.default import DefaultBotProperties
+from aiogram.types import BotCommand
 
-from bot.routers import onboarding  # твой новый роутер
-# при необходимости: from bot.routers import admin_panel, admin_reply, provider_menu, billing
+logging.basicConfig(level=logging.INFO)
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
-async def on_startup_set_commands(bot: Bot):
-    commands = [
-        BotCommand(command="start", description="Начать / Choose language"),
-        BotCommand(command="profile", description="Профиль мастера"),
-        BotCommand(command="search", description="Поиск мастеров"),
+async def set_cmds(bot: Bot):
+    await bot.set_my_commands([
+        BotCommand(command="start",     description="Начать / Choose language"),
+        BotCommand(command="profile",   description="Профиль мастера"),
+        BotCommand(command="search",    description="Поиск мастеров"),
         BotCommand(command="subscribe", description="Подписка €10/мес"),
-        BotCommand(command="admin", description="Админ-панель (только для владельца)"),
-    ]
-    await bot.set_my_commands(commands)
+        BotCommand(command="admin",     description="Админ-панель"),
+    ])
 
 async def main():
-    if not TOKEN:
+    load_dotenv()
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is empty")
-    bot = Bot(token=TOKEN, session=AiohttpSession())
+
+    bot = Bot(token=token, session=AiohttpSession(),
+              default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
 
-    # ВАЖНО: первым — онбординг с /start
+    # онбординг — первым
+    from bot.routers import onboarding
     dp.include_router(onboarding.router)
-    # затем остальные роутеры:
-    # dp.include_router(provider_menu.router)
-    # dp.include_router(admin_panel.router)
-    # dp.include_router(admin_reply.router)
-    # dp.include_router(billing.router)
 
-    await on_startup_set_commands(bot)
-    print("Bot started")
-    await dp.start_polling(bot)
+    await bot.delete_webhook(drop_pending_updates=True)
+    await set_cmds(bot)
+
+    me = await bot.get_me()
+    print(f"Bot started: @{me.username} (id={me.id})")
+    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 if __name__ == "__main__":
     asyncio.run(main())
