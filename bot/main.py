@@ -29,7 +29,10 @@ async def main():
 
     # онбординг — первым
     from bot.routers import onboarding
+    from bot.routers import provider_reg
+
     dp.include_router(onboarding.router)
+    dp.include_router(provider_reg.router)
 
     await bot.delete_webhook(drop_pending_updates=True)
     await set_cmds(bot)

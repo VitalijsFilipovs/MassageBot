@@ -3,10 +3,12 @@ from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import ReplyKeyboardRemove
 
 from ..i18n import t, Lang
 from ..keyboards import lang_keyboard, role_keyboard, gender_keyboard, share_contact_keyboard
-from ..states import Onboarding
+from ..states import Onboarding, ProviderReg
 from .. import api
 
 router = Router()
@@ -24,36 +26,37 @@ async def cmd_start(m: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("lang:"))
 async def cb_lang(c: CallbackQuery, state: FSMContext):
-    lang = c.data.split(":", 1)[1]  # ru|lv|en
+    lang = c.data.split(":", 1)[1]
     await state.update_data(lang=lang)
-    # завести/обновить пользователя в API
     await api.get_or_create_user(tg_id=c.from_user.id, locale=lang)
+
+    # сразу приветствие; просто убираем клавиатуру языка
+    try:
+        await c.message.edit_text(t("greeting", lang), reply_markup=None)
+    except TelegramBadRequest:
+        pass
+
     await state.set_state(Onboarding.role)
-    await c.message.edit_text(t("start_choose_role", lang))
-    await c.message.edit_reply_markup(reply_markup=role_keyboard(lang))  # показать роли
+    await c.message.answer(t("start_choose_role", lang), reply_markup=role_keyboard(lang))
     await c.answer()
+    await _remove_markup_safe(c.message)
 
 @router.callback_query(F.data.startswith("role:"))
 async def cb_role(c: CallbackQuery, state: FSMContext):
-    role = c.data.split(":", 1)[1]  # provider|client
-    data = await state.get_data()
-    lang = get_lang(data)
-
-    # сохранить роль у пользователя
+    role = c.data.split(":", 1)[1]
+    data = await state.get_data(); lang = data.get("lang", DEFAULT_LANG)
     await api.update_user(tg_id=c.from_user.id, role=role)
 
     if role == "provider":
-        # если уже есть профиль — сразу приветствие
         if await api.provider_exists(tg_id=c.from_user.id):
             await c.message.edit_text(t("provider_known", lang))
-            await c.message.edit_reply_markup()  # убрать кнопки
+            await c.message.edit_reply_markup()
         else:
-            # спросим пол и предложим поделиться контактом
             await state.set_state(Onboarding.provider_gender)
             await c.message.edit_text(t("choose_gender", lang))
             await c.message.edit_reply_markup(reply_markup=gender_keyboard(lang))
     else:
-        # клиент: спросим предпочтительный пол массажиста
+        # как было — для клиента
         await state.set_state(Onboarding.client_gender)
         await c.message.edit_text(t("client_choose_gender", lang))
         await c.message.edit_reply_markup(reply_markup=gender_keyboard(lang))
@@ -61,13 +64,16 @@ async def cb_role(c: CallbackQuery, state: FSMContext):
 
 @router.callback_query(Onboarding.provider_gender, F.data.startswith("gender:"))
 async def cb_provider_gender(c: CallbackQuery, state: FSMContext):
-    gender = c.data.split(":", 1)[1]  # female|male|other
+    gender = c.data.split(":", 1)[1]
     data = await state.get_data()
     lang = get_lang(data)
     await api.update_user(tg_id=c.from_user.id, gender=gender)
 
-    # предложить шаринг контакта (для верификации/связи)
-    await c.message.answer(t("provider_register", lang), reply_markup=share_contact_keyboard(lang))
+    # старт мастера анкеты
+    # порядок: сначала инфо о подписке, потом просим имя
+    await c.message.answer(t("fee_note", lang))
+    await state.set_state(ProviderReg.name)
+    await c.message.answer(t("reg_name", lang), reply_markup=ReplyKeyboardRemove())
     await c.answer()
 
 @router.message(Onboarding.provider_gender, F.contact)
@@ -170,3 +176,9 @@ async def cb_profile_detail(c: CallbackQuery, state: FSMContext):
     if c.from_user.username:
         await c.message.answer(f"Написать: https://t.me/{c.from_user.username}")
     await c.answer()
+
+async def _remove_markup_safe(msg):
+    try:
+        await msg.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass

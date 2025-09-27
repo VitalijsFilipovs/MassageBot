@@ -1,39 +1,68 @@
+# app/routers/masseuses.py
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
-from app.database import get_db
-from app import models
+from sqlalchemy import select, and_, func
 
-router = APIRouter(prefix="/api/v1", tags=["masseuses"])
+try:
+    from app.utils.database import SessionLocal
+except ModuleNotFoundError:
+    from app.database import SessionLocal
 
-@router.get("/masseuses")
-def list_masseuses(
-    city: str | None = Query(default=None, description="Город (например: Рига)"),
-    service: str | None = Query(default=None, description="Код услуги (classic/thai/relax/...)"),
-    limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+from app.models import Profile, User
+
+router = APIRouter(prefix="/api/v1/masseuses", tags=["masseuses"])
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@router.get("")
+def search(
     db: Session = Depends(get_db),
+    city_id: int | None = Query(None),
+    gender: str | None = Query(None),
+    q: str | None = Query(None),
+    limit: int = 20,
+    offset: int = 0,
 ):
-    q = db.query(models.Masseuse).filter(models.Masseuse.subscription_status == "active")
+    cond = [Profile.status == "approved", Profile.is_published == True]
+    if city_id:
+        cond.append(Profile.city_id == city_id)
+    if gender:
+        cond.append(Profile.gender == gender)
+    if q:
+        like = f"%{q}%"
+        cond.append((Profile.display_name.ilike(like)) | (Profile.about.ilike(like)))
 
-    if city:
-        q = q.filter(func.lower(models.Masseuse.city) == city.lower())
+    items = db.execute(
+        select(Profile)
+        .where(and_(*cond))
+        .order_by(Profile.created_at.desc())
+        .limit(limit).offset(offset)
+    ).scalars().all()
 
-    if service:
-        # services — JSON-массив; contains по списку ищет в массиве
-        q = q.filter(models.Masseuse.services.contains([service]))
+    total = db.execute(
+        select(func.count()).select_from(
+            select(Profile.id).where(and_(*cond)).subquery()
+        )
+    ).scalar_one()
 
-    q = q.offset(offset).limit(limit)
+    def to_card(p: Profile):
+        tg = db.get(User, p.user_id).tg_id if p.user_id else None
+        return {
+            "id": p.id,
+            "display_name": p.display_name,
+            "city_id": p.city_id,
+            "gender": p.gender,
+            "price_from": p.price_from,
+            "photos": (p.photos or [])[:3],
+            "about": (p.about or "")[:200],
+            "phone_public": p.phone_public if p.share_phone_publicly else None,
+            "user_tg_id": tg,
+            "status": p.status,
+        }
 
-    items = []
-    for m in q.all():
-        user = db.query(models.User).get(m.user_id)
-        items.append({
-            "id": m.user_id,
-            "name": user.name_display if user else None,
-            "city": m.city,
-            "description": m.description,
-            "services": m.services,
-            "subscription_status": m.subscription_status,
-        })
-    return {"count": len(items), "items": items}
+    return {"count": total, "items": [to_card(p) for p in items]}

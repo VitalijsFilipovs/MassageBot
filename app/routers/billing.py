@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
-from app.database import SessionLocal
+from app.utils.database import get_db
 from app.models import Profile, User
 from app.config import get_settings
 from app.services.paypal import create_subscription

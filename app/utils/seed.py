@@ -1,6 +1,6 @@
 # app/utils/seed.py
 from datetime import datetime
-from app.database import SessionLocal
+from app.utils.database import get_db
 from app import models
 
 def run():

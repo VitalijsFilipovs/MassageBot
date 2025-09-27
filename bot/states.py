@@ -7,3 +7,13 @@ class Onboarding(StatesGroup):
     provider_gender = State()
     client_gender = State()
     choose_city = State()
+
+class ProviderReg(StatesGroup):
+    name = State()
+    city = State()
+    about = State()
+    price = State()
+    phone = State()           # <— новый шаг
+    phone_vis = State()       # <— показать/скрыть
+    photos = State()
+    confirm = State()

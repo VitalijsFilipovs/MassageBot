@@ -47,3 +47,9 @@ async def get_profile(profile_id: int) -> dict:
         r = await client.get(f"/profiles/{profile_id}")
         r.raise_for_status()
         return r.json()
+
+async def save_profile(tg_id: int, payload: dict):
+    async with httpx.AsyncClient(base_url=API_BASE, timeout=20) as client:
+        r = await client.post("/api/v1/profiles/upsert", json={"tg_id": tg_id, **payload})
+        r.raise_for_status()
+        return r.json()
